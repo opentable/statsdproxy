@@ -138,7 +138,7 @@ func ListenStatsD(port int, quit <-chan bool, metric_chan chan<- []byte) {
 }
 
 func main() {
-	var config_file = flag.String("config", "/etc/statsproxy.json", "Config file to load")
+	var config_file = flag.String("config", "/etc/statsdproxy.json", "Config file to load")
 	flag.Parse()
 	config := LoadConfig(*config_file)
 	live_servers := config.Servers
