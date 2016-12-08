@@ -83,10 +83,11 @@ func CheckBackend(servers []StatsdServer, status_chan chan<- []StatsdServer, qui
 	}
 }
 
-func HandleMetric(servers []StatsdServer, metric []byte) {
+func HandleMetric(servers []StatsdServer, metric string) {
 	h := fnv.New32a()
-	metric = bytes.TrimSpace(metric)
-	metric_name := bytes.SplitN(metric, []byte(":"), 2)[0]
+	metric_bytes := []byte(metric)
+	metric_bytes = bytes.TrimSpace(metric_bytes)
+	metric_name := bytes.SplitN(metric_bytes, []byte(":"), 2)[0]
 	h.Write(metric_name)
 	if len(servers) > 0 {
 		dest_index := h.Sum32() % uint32(len(servers))
@@ -101,7 +102,7 @@ func HandleMetric(servers []StatsdServer, metric []byte) {
 				err,
 			)
 		} else {
-			Conn.Write(metric)
+			Conn.Write(metric_bytes)
 		}
 	}
 }
@@ -120,7 +121,7 @@ func LoadConfig(filename string) Configuration {
 	return configuration
 }
 
-func ListenStatsD(port int, quit <-chan bool, metric_chan chan<- []byte) {
+func ListenStatsD(port int, quit <-chan bool, metric_chan chan<- string) {
 	ServerAddr, _ := net.ResolveUDPAddr("udp", ":8125")
 	ServerConn, _ := net.ListenUDP("udp", ServerAddr)
 	defer ServerConn.Close()
@@ -132,7 +133,7 @@ func ListenStatsD(port int, quit <-chan bool, metric_chan chan<- []byte) {
 		if err != nil {
 			log.Printf("Failed to read from socket: %s", err)
 		} else {
-			metric_chan <- buf[0:count]
+			metric_chan <- string(buf[0:count])
 		}
 	}
 }
@@ -146,7 +147,7 @@ func main() {
 	status_chan := make(chan []StatsdServer)
 	quit_backend := make(chan bool)
 	quit_listen := make(chan bool)
-	metric_chan := make(chan []byte)
+	metric_chan := make(chan string)
 
 	go CheckBackend(config.Servers, status_chan, quit_backend)
 	go ListenStatsD(8125, quit_listen, metric_chan)
@@ -159,7 +160,6 @@ func main() {
 				log.Printf("No live servers to send metrics to. Dropping packets")
 			}
 		case metric := <-metric_chan:
-			fmt.Printf("%s\n", metric)
 			HandleMetric(live_servers, metric)
 		}
 	}
