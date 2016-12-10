@@ -12,26 +12,32 @@ import (
 	"time"
 )
 
+// StatsdServer represents a backend instance
 type StatsdServer struct {
-	Ip       string
-	UdpPort  string
+	IP       string
+	UDPPort  string
 	MgmtPort string
 }
 
+// Configuration stores the core configuration of the proxy
 type Configuration struct {
 	Workers       uint
 	CheckInterval uint
 	Servers       []StatsdServer
 }
 
-func (s *StatsdServer) UdpAddress() string {
-	return net.JoinHostPort(s.Ip, s.UdpPort)
+// UDPAddress returns the string representation of the statsd udp endpoint
+func (s *StatsdServer) UDPAddress() string {
+	return net.JoinHostPort(s.IP, s.UDPPort)
 }
 
+// MgmtAddress returns the string representation of the statsd management
+// address
 func (s *StatsdServer) MgmtAddress() string {
-	return net.JoinHostPort(s.Ip, s.MgmtPort)
+	return net.JoinHostPort(s.IP, s.MgmtPort)
 }
 
+// CheckStatsdHealth checks the health of a single instance
 func (s *StatsdServer) CheckStatsdHealth() (up bool, err error) {
 	addr := s.MgmtAddress()
 	conn, err := net.Dial("tcp", addr)
@@ -50,62 +56,75 @@ func (s *StatsdServer) CheckStatsdHealth() (up bool, err error) {
 	buffer := make([]byte, 100)
 	count, err = conn.Read(buffer)
 	if count != 11 || err != nil {
-		return false, fmt.Errorf("Unable to read health response from %s: %s\n", addr, err)
+		return false, fmt.Errorf("Unable to read health response from %s: %s", addr, err)
 	}
 
 	if bytes.Equal(buffer[0:count], []byte("health: up\n")) {
 		conn.Write([]byte("quit\n"))
 		return true, error(nil)
-	} else {
-		return false, fmt.Errorf("Health check to %s failed: Response %s\n", addr, string(buffer))
 	}
+	return false, fmt.Errorf("Health check to %s failed: Response %s", addr, string(buffer))
 }
 
-func CheckBackend(servers []StatsdServer, status_chan chan<- []StatsdServer, quit <-chan bool) {
+// CheckBackend checks each backend server in turn
+func CheckBackend(servers []StatsdServer, statusChan chan<- []StatsdServer, quit <-chan bool) {
 	for {
 		select {
 		case <-quit:
 			return
 		default:
-			var live_servers []StatsdServer
+			var lineServers []StatsdServer
 			for _, server := range servers {
 				up, err := server.CheckStatsdHealth()
 				if up && err == nil {
-					live_servers = append(live_servers, server)
+					lineServers = append(lineServers, server)
 				} else {
-					log.Printf("Removing server %s: %s", server.UdpAddress(), err)
+					log.Printf("Removing server %s: %s", server.UDPAddress(), err)
 				}
 			}
-			status_chan <- live_servers
+			statusChan <- lineServers
 		}
 
 		time.Sleep(10 * time.Second)
 	}
 }
 
+// HandleMetric handles an individual metric string by hashing and passing to a
+// backend
 func HandleMetric(servers []StatsdServer, metric []byte) {
 	h := fnv.New32a()
 	metric = bytes.TrimSpace(metric)
-	metric_name := bytes.SplitN(metric, []byte(":"), 2)[0]
-	h.Write(metric_name)
+	metricName := bytes.SplitN(metric, []byte(":"), 2)[0]
+	h.Write(metricName)
 	if len(servers) > 0 {
-		dest_index := h.Sum32() % uint32(len(servers))
-		LocalAddr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:0")
-		RemoteAddr, _ := net.ResolveUDPAddr("udp", servers[dest_index].UdpAddress())
+		destIndex := h.Sum32() % uint32(len(servers))
+		LocalAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+		if err != nil {
+			log.Printf("Failed to resolve local udp address: %s", err)
+		}
+
+		RemoteAddr, err := net.ResolveUDPAddr("udp", servers[destIndex].UDPAddress())
+		if err != nil {
+			log.Printf("Failed to resolve remote address (%s): %s", servers[destIndex].UDPAddress(), err)
+		}
 		Conn, err := net.DialUDP("udp", LocalAddr, RemoteAddr)
 		defer Conn.Close()
 
 		if err != nil {
 			log.Printf("Failed to write metric to %s: %s",
-				servers[dest_index].UdpAddress(),
+				servers[destIndex].UDPAddress(),
 				err,
 			)
 		} else {
-			Conn.Write(metric)
+			_, err := Conn.Write(metric)
+			if err != nil {
+				log.Printf("Failed to write metric to %s: %s", servers[destIndex].UDPAddress(), err)
+			}
 		}
 	}
 }
 
+// LoadConfig loads the config from the config file
 func LoadConfig(filename string) Configuration {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -120,9 +139,18 @@ func LoadConfig(filename string) Configuration {
 	return configuration
 }
 
-func ListenStatsD(port int, quit <-chan bool, metric_chan chan<- []byte) {
-	ServerAddr, _ := net.ResolveUDPAddr("udp", ":8125")
-	ServerConn, _ := net.ListenUDP("udp", ServerAddr)
+// ListenStatsD listens for stats on the default port
+func ListenStatsD(port int, quit <-chan bool, metricChan chan<- []byte) {
+	ServerAddr, err := net.ResolveUDPAddr("udp", ":8125")
+	if err != nil {
+		log.Printf("Failed to resolve listening address: %s", err)
+	}
+
+	ServerConn, err := net.ListenUDP("udp", ServerAddr)
+	if err != nil {
+		log.Printf("Failed to listen at listening port: %s", err)
+	}
+
 	defer ServerConn.Close()
 
 	for {
@@ -131,35 +159,34 @@ func ListenStatsD(port int, quit <-chan bool, metric_chan chan<- []byte) {
 		if err != nil {
 			log.Printf("Failed to read from socket: %s", err)
 		} else {
-			fmt.Println(buf[0:count])
-			metric_chan <- buf[0:count]
+			metricChan <- buf[0:count]
 		}
 	}
 }
 
 func main() {
-	var config_file = flag.String("config", "/etc/statsdproxy.json", "Config file to load")
+	var configFile = flag.String("config", "/etc/statsdproxy.json", "Config file to load")
 	flag.Parse()
-	config := LoadConfig(*config_file)
-	live_servers := config.Servers
+	config := LoadConfig(*configFile)
+	lineServers := config.Servers
 
-	status_chan := make(chan []StatsdServer)
-	quit_backend := make(chan bool)
-	quit_listen := make(chan bool)
-	metric_chan := make(chan []byte)
+	statusChan := make(chan []StatsdServer)
+	quitBackend := make(chan bool)
+	quitListen := make(chan bool)
+	metricChan := make(chan []byte)
 
-	go CheckBackend(config.Servers, status_chan, quit_backend)
-	go ListenStatsD(8125, quit_listen, metric_chan)
+	go CheckBackend(config.Servers, statusChan, quitBackend)
+	go ListenStatsD(8125, quitListen, metricChan)
 
 	for {
 		select {
-		case live_servers = <-status_chan:
+		case lineServers = <-statusChan:
 			log.Printf("Got a new server list")
-			if len(live_servers) == 0 {
+			if len(lineServers) == 0 {
 				log.Printf("No live servers to send metrics to. Dropping packets")
 			}
-		case metric := <-metric_chan:
-			HandleMetric(live_servers, metric)
+		case metric := <-metricChan:
+			go HandleMetric(lineServers, metric)
 		}
 	}
 }
