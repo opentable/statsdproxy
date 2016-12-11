@@ -67,7 +67,7 @@ func (s *StatsdServer) CheckStatsdHealth() (up bool, err error) {
 }
 
 // CheckBackend checks each backend server in turn
-func CheckBackend(servers []StatsdServer, statusChan chan<- []StatsdServer, quit <-chan bool) {
+func CheckBackend(servers []StatsdServer, statusChan chan<- []StatsdServer, quit <-chan bool, checkInterval uint) {
 	for {
 		select {
 		case <-quit:
@@ -85,7 +85,7 @@ func CheckBackend(servers []StatsdServer, statusChan chan<- []StatsdServer, quit
 			statusChan <- lineServers
 		}
 
-		time.Sleep(10 * time.Second)
+		time.Sleep(time.Duration(checkInterval) * time.Second)
 	}
 }
 
@@ -175,7 +175,7 @@ func main() {
 	quitListen := make(chan bool)
 	metricChan := make(chan []byte)
 
-	go CheckBackend(config.Servers, statusChan, quitBackend)
+	go CheckBackend(config.Servers, statusChan, quitBackend, config.CheckInterval)
 	go ListenStatsD(8125, quitListen, metricChan)
 
 	for {
