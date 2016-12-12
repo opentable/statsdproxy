@@ -181,7 +181,6 @@ func main() {
 	for {
 		select {
 		case lineServers = <-statusChan:
-			log.Printf("Got a new server list")
 			if len(lineServers) == 0 {
 				log.Printf("No live servers to send metrics to. Dropping packets")
 			}
