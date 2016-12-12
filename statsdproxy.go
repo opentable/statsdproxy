@@ -23,6 +23,7 @@ type StatsdServer struct {
 type Configuration struct {
 	Workers       uint
 	CheckInterval uint
+	ListenPort    uint
 	Servers       []StatsdServer
 }
 
@@ -140,8 +141,8 @@ func LoadConfig(filename string) Configuration {
 }
 
 // ListenStatsD listens for stats on the default port
-func ListenStatsD(port int, quit <-chan bool, metricChan chan<- []byte) {
-	ServerAddr, err := net.ResolveUDPAddr("udp", ":8125")
+func ListenStatsD(port uint, quit <-chan bool, metricChan chan<- []byte) {
+	ServerAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		log.Printf("Failed to resolve listening address: %s", err)
 	}
@@ -176,7 +177,7 @@ func main() {
 	metricChan := make(chan []byte)
 
 	go CheckBackend(config.Servers, statusChan, quitBackend, config.CheckInterval)
-	go ListenStatsD(8125, quitListen, metricChan)
+	go ListenStatsD(config.ListenPort, quitListen, metricChan)
 
 	for {
 		select {
