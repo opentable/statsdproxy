@@ -21,7 +21,6 @@ type StatsdServer struct {
 
 // Configuration stores the core configuration of the proxy
 type Configuration struct {
-	Workers       uint
 	CheckInterval uint
 	ListenPort    uint
 	Servers       []StatsdServer
@@ -172,12 +171,12 @@ func main() {
 	lineServers := config.Servers
 
 	statusChan := make(chan []StatsdServer)
-	quitBackend := make(chan bool)
-	quitListen := make(chan bool)
+	quitBackendChan := make(chan bool)
+	quitListenerChan := make(chan bool)
 	metricChan := make(chan []byte)
 
-	go CheckBackend(config.Servers, statusChan, quitBackend, config.CheckInterval)
-	go ListenStatsD(config.ListenPort, quitListen, metricChan)
+	go CheckBackend(config.Servers, statusChan, quitBackendChan, config.CheckInterval)
+	go ListenStatsD(config.ListenPort, quitListenerChan, metricChan)
 
 	for {
 		select {
