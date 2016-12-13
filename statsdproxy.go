@@ -141,7 +141,7 @@ func LoadConfig(filename string) Configuration {
 
 // ListenStatsD listens for stats on the default port
 func ListenStatsD(port uint, quit <-chan bool, metricChan chan<- []byte) {
-	ServerAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", port))
+	ServerAddr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf(":%d", port))
 	if err != nil {
 		log.Printf("Failed to resolve listening address: %s", err)
 	}
@@ -173,7 +173,7 @@ func main() {
 	statusChan := make(chan []StatsdServer)
 	quitBackendChan := make(chan bool)
 	quitListenerChan := make(chan bool)
-	metricChan := make(chan []byte)
+	metricChan := make(chan []byte, 100)
 
 	go CheckBackend(config.Servers, statusChan, quitBackendChan, config.CheckInterval)
 	go ListenStatsD(config.ListenPort, quitListenerChan, metricChan)
