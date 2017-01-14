@@ -73,16 +73,16 @@ func CheckBackend(servers []StatsdServer, statusChan chan<- []StatsdServer, quit
 		case <-quit:
 			return
 		default:
-			var lineServers []StatsdServer
+			var liveServers []StatsdServer
 			for _, server := range servers {
 				up, err := server.CheckStatsdHealth()
 				if up && err == nil {
-					lineServers = append(lineServers, server)
+					liveServers = append(liveServers, server)
 				} else {
 					log.Printf("Removing server %s: %s", server.UDPAddress(), err)
 				}
 			}
-			statusChan <- lineServers
+			statusChan <- liveServers
 		}
 
 		time.Sleep(time.Duration(checkInterval) * time.Second)
@@ -168,7 +168,7 @@ func main() {
 	var configFile = flag.String("config", "/etc/statsdproxy.json", "Config file to load")
 	flag.Parse()
 	config := LoadConfig(*configFile)
-	lineServers := config.Servers
+	liveServers := config.Servers
 
 	statusChan := make(chan []StatsdServer)
 	quitBackendChan := make(chan bool)
@@ -180,12 +180,12 @@ func main() {
 
 	for {
 		select {
-		case lineServers = <-statusChan:
-			if len(lineServers) == 0 {
+		case liveServers = <-statusChan:
+			if len(liveServers) == 0 {
 				log.Printf("No live servers to send metrics to. Dropping packets")
 			}
 		case metric := <-metricChan:
-			go HandleMetric(lineServers, metric)
+			go HandleMetric(liveServers, metric)
 		}
 	}
 }
