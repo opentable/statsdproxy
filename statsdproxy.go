@@ -67,10 +67,10 @@ func (s *StatsdServer) CheckStatsdHealth() (up bool, err error) {
 }
 
 // CheckBackend checks each backend server in turn
-func CheckBackend(servers []StatsdServer, statusChan chan<- []StatsdServer, quit <-chan bool, checkInterval uint) {
+func CheckBackend(servers []StatsdServer, statusChan chan<- []StatsdServer, done <-chan struct{}, checkInterval uint) {
 	for {
 		select {
-		case <-quit:
+		case <-done:
 			return
 		default:
 			var liveServers []StatsdServer
@@ -140,7 +140,7 @@ func LoadConfig(filename string) Configuration {
 }
 
 // ListenStatsD listens for stats on the default port
-func ListenStatsD(port uint, quit <-chan bool, metricChan chan<- []byte) {
+func ListenStatsD(port uint, done <-chan struct{}, metricChan chan<- []byte) {
 	ServerAddr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf(":%d", port))
 	if err != nil {
 		log.Printf("Failed to resolve listening address: %s", err)
@@ -154,12 +154,17 @@ func ListenStatsD(port uint, quit <-chan bool, metricChan chan<- []byte) {
 	defer ServerConn.Close()
 
 	for {
-		buf := make([]byte, 1024, 1024)
-		count, _, err := ServerConn.ReadFromUDP(buf)
-		if err != nil {
-			log.Printf("Failed to read from socket: %s", err)
-		} else {
-			metricChan <- buf[0:count]
+		select {
+		case <-done:
+			return
+		default:
+			buf := make([]byte, 1024, 1024)
+			count, _, err := ServerConn.ReadFromUDP(buf)
+			if err != nil {
+				log.Printf("Failed to read from socket: %s", err)
+			} else {
+				metricChan <- buf[0:count]
+			}
 		}
 	}
 }
@@ -170,13 +175,14 @@ func main() {
 	config := LoadConfig(*configFile)
 	liveServers := config.Servers
 
+	done := make(chan struct{})
+	defer close(done)
+
 	statusChan := make(chan []StatsdServer)
-	quitBackendChan := make(chan bool)
-	quitListenerChan := make(chan bool)
 	metricChan := make(chan []byte, 100)
 
-	go CheckBackend(config.Servers, statusChan, quitBackendChan, config.CheckInterval)
-	go ListenStatsD(config.ListenPort, quitListenerChan, metricChan)
+	go CheckBackend(config.Servers, statusChan, done, config.CheckInterval)
+	go ListenStatsD(config.ListenPort, done, metricChan)
 
 	for {
 		select {
